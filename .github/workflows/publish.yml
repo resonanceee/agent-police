@@ -1,0 +1,27 @@
+name: publish
+
+on:
+  push:
+    branches: [main] # fires on PR merges; direct pushes to main are blocked by ruleset
+
+permissions:
+  contents: read
+  id-token: write # OIDC — npm trusted publishing / provenance, no NPM_TOKEN secret needed
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test/harness.ts --mock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm publish --provenance --access public
+        # one-time manual setup on npmjs.com:
+        # package -> Settings -> Trusted Publisher -> repo resonanceee/agent-police,
+        # workflow .github/workflows/publish.yml

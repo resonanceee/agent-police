@@ -1,0 +1,37 @@
+{
+  "name": "@resonanceee/agent-police",
+  "version": "0.1.0",
+  "description": "Opencode plugin: an LLM reviewer judges every bash command the coding agent wants to run (safe / elaborate / human-review) before execution.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./plugin.ts",
+  "exports": {
+    ".": "./plugin.ts"
+  },
+  "files": [
+    "plugin.ts",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/resonanceee/agent-police.git"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "ai-safety",
+    "agent-security",
+    "command-review"
+  ],
+  "scripts": {
+    "test": "bun test/harness.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "latest",
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,6 @@
+node_modules/
+.env
+PLAN.md
+*.log
+test/tmp-project/
+test/results-*.json
