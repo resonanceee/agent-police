@@ -4,6 +4,8 @@
 [![npm](https://img.shields.io/npm/v/@resonanceee/agent-police)](https://www.npmjs.com/package/@resonanceee/agent-police)
 [![license](https://img.shields.io/npm/l/@resonanceee/agent-police)](./LICENSE)
 
+Published on [npmjs](https://www.npmjs.com/package/@resonanceee/agent-police) and [GitHub Packages](https://github.com/resonanceee/agent-police/pkgs/npm/agent-police).
+
 An [opencode](https://opencode.ai) plugin that puts a **police officer between your coding agent and your machine**: an LLM reviewer judges every bash command the agent wants to run, *before* it executes.
 
 Catches agents that are **misaligned with the task** — whether from hidden malice, a prompt-injected payload, or a model that simply misunderstood the task and is about to do something destructive with confidence.

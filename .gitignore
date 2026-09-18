@@ -4,3 +4,4 @@ PLAN.md
 *.log
 test/tmp-project/
 test/results-*.json
+*.tgz
