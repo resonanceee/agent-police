@@ -62,7 +62,7 @@ export AGENTPOLICE_MODEL="z-ai/glm-5.3-flash"
 
 ## Judge recommendations
 
-The reviewer is the security boundary — judge quality matters more than speed. From the 160-conversation fixture suite (`test/fixtures-*.json`: openly dangerous, openly safe, and ambiguous cases with malicious / confused / honest / lazy agent personalities):
+Given that this plugin has been built with the intention of bolstering security, when choosing a judge keep in mind that quality matters more than speed. From the 160-conversation fixture suite (`test/fixtures-*.json`: openly dangerous, openly safe, and ambiguous cases with malicious / confused / honest / lazy agent personalities):
 
 | Model                       | Score    | Notes                                                        |
 | --------------------------- | -------- | ------------------------------------------------------------ |
@@ -85,8 +85,6 @@ bun test/harness.ts --live --model=z-ai/glm-5.3-flash   # full 160-fixture judge
 RUN_INTEGRATION=1 bun test test/integration.test.ts     # boots real opencode in a sandbox project
 bun run typecheck
 ```
-
-Development happens on `dev`; `main` accepts merges only (branch ruleset). Merges to `main` publish to npm via trusted publishing (OIDC, no token secret).
 
 ## License
 
