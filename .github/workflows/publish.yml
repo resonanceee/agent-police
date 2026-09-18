@@ -1,27 +1,55 @@
 name: publish
 
+# Auto-publishes when the version in package.json changes on main.
+# Registries reject duplicate versions, so the job first checks whether the
+# version is new; unchanged versions are a no-op.
+# Dual-publish: npmjs (trusted publishing, OIDC) + GitHub Packages, which is
+# what makes the package show up in the repo's Packages section.
+
 on:
   push:
     branches: [main] # fires on PR merges; direct pushes to main are blocked by ruleset
 
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
-  id-token: write # OIDC — npm trusted publishing / provenance, no NPM_TOKEN secret needed
+  packages: write # GitHub Packages publish
+  id-token: write # OIDC trusted publishing (npmjs) — no long-lived tokens
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test/harness.ts --mock
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24 # bundles npm >= 11.5.1 (trusted publishing minimum)
           registry-url: https://registry.npmjs.org
-      - run: npm publish --provenance --access public
-        # one-time manual setup on npmjs.com:
-        # package -> Settings -> Trusted Publisher -> repo resonanceee/agent-police,
-        # workflow .github/workflows/publish.yml
+      - name: Skip if version already published
+        id: gate
+        run: |
+          LOCAL=$(node -p "require('./package.json').version")
+          REMOTE=$(npm view @resonanceee/agent-police version 2>/dev/null || echo "")
+          echo "local=$LOCAL remote=${REMOTE:-none}"
+          if [ "$LOCAL" = "$REMOTE" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish to npmjs
+        if: steps.gate.outputs.publish == 'true'
+        run: npm publish --provenance --access public
+      - name: Publish to GitHub Packages
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          # setup-node points NPM_CONFIG_USERCONFIG at its own .npmrc; use an
+          # isolated config so the GPR token is actually picked up
+          printf '@resonanceee:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=%s\n' "${{ secrets.GITHUB_TOKEN }}" > "$RUNNER_TEMP/gpr.npmrc"
+          npm publish --access public --registry=https://npm.pkg.github.com --userconfig "$RUNNER_TEMP/gpr.npmrc"
