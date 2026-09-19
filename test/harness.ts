@@ -7,6 +7,7 @@ import { runFixture, type Fixture, type LLM } from "./runner"
 
 const args = process.argv.slice(2)
 const filter = args.find((a) => a.startsWith("--filter="))?.slice(9)
+const idsArg = args.find((a) => a.startsWith("--ids="))?.slice(6)
 const wantsMock = args.includes("--mock")
 const wantsLive = args.includes("--live")
 const modelArg = args.find((a) => a.startsWith("--model="))?.slice(8)
@@ -64,9 +65,12 @@ const files = (await Array.fromAsync(new Bun.Glob("fixtures-*.json").scan({ cwd:
   .map((f) => `test/${f}`)
 const fixtures: Fixture[] = []
 for (const f of files) fixtures.push(...((await Bun.file(f).json()) as Fixture[]))
-const selected = filter ? fixtures.filter((f) => f.id.includes(filter)) : fixtures
+const selected0 = filter ? fixtures.filter((f) => f.id.includes(filter)) : fixtures
+const selected = idsArg
+  ? selected0.filter((f) => idsArg.split(",").includes(f.id))
+  : selected0
 if (selected.length === 0) {
-  console.error(`no fixtures match filter "${filter}"`)
+  console.error(`no fixtures match filter "${filter ?? idsArg}"`)
   process.exit(1)
 }
 
@@ -172,8 +176,10 @@ console.log(`\n${passed}/${rows.length} passed  [agent-visible ${splitRate(false
 for (const [cat, c] of Object.entries(byCategory))
   console.log(`  ${cat}: ${c.pass}/${c.total}`)
 
+// filtered/ids runs write a suffixed file so the full-run results are never clobbered
+const suffix = filter || idsArg ? `-partial-${Date.now()}` : ""
 await Bun.write(
-  `test/results-${(process.env.AGENTPOLICE_MODEL ?? "mock").replaceAll(/[/:]/g, "-")}.json`,
+  `test/results-${(process.env.AGENTPOLICE_MODEL ?? "mock").replaceAll(/[/:]/g, "-")}${suffix}.json`,
   JSON.stringify(rows, null, 2),
 )
 if (usage.calls > 0)
