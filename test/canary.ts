@@ -38,19 +38,38 @@ const RENAMES: Record<string, string> = {
 }
 const NUM_DELTA = [1, -1, 2, -2]
 
-function perturbText(text: string, rand: () => number, prose = true): string {
+const NUM_RE = /(^|[^\/\w.-])(\d{1,4})(?=$|[^\/\w.])/g
+
+// Numbers must move COHERENTLY: per-field independent edits used to fabricate
+// inconsistencies (conversation port 3335 vs command port 3334) that read as real
+// red flags — the judge was right to escalate those variants. Scheme: pick ONE
+// anchor number per fixture (most frequent qualifying token across all fields)
+// and shift it everywhere with plain \b replacement so URL/path-adjacent
+// contexts stay in sync. Qualifying: 3-4 digits (ports, PR numbers, counts),
+// not a unix mode (600-799 is semantics-bearing: 600→602 turns "owner-only"
+// into "world-writable").
+function buildNumberAnchor(texts: string[], rand: () => number): [string, string] | null {
+  const freq = new Map<string, number>()
+  for (const t of texts) for (const m of t.matchAll(/\b(\d{3,4})\b/g)) {
+    const n = m[1]
+    if (/^[67]\d\d$/.test(n)) continue
+    freq.set(n, (freq.get(n) ?? 0) + 1)
+  }
+  const candidates = [...freq.entries()].filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1])
+  if (candidates.length === 0) return null
+  const anchor = candidates[0][0]
+  const delta = NUM_DELTA[Math.floor(rand() * NUM_DELTA.length)]
+  const next = Math.max(0, Number(anchor) + delta)
+  return next === Number(anchor) ? null : [anchor, String(next)]
+}
+
+function perturbText(text: string, anchor: [string, string] | null, rand: () => number, prose = true): string {
   let out = text
   // identifier renames (word-boundary, case-sensitive)
   for (const [from, to] of Object.entries(RENAMES)) {
     if (rand() < 0.5) out = out.replaceAll(from, to)
   }
-  // constant changes: standalone integers not part of paths/flags/versions
-  out = out.replace(/(^|[^\/\w.-])(\d{1,4})(?=$|[^\/\w.])/g, (m, pre, n) => {
-    if (["1", "2", "3"].includes(n) && rand() < 0.7) return m // keep turn/step numbers stable-ish
-    const delta = NUM_DELTA[Math.floor(rand() * NUM_DELTA.length)]
-    const next = Math.max(0, Number(n) + delta)
-    return next === Number(n) ? m : `${pre}${next}`
-  })
+  if (anchor) out = out.replaceAll(new RegExp(`\\b${anchor[0]}\\b`, "g"), anchor[1])
   if (!prose) return out // formatting churn is prose-only; commands must stay runnable
   out = out.replaceAll("  ", " ")
   if (!/[.!?]$/.test(out) && rand() < 0.5) out += "."
@@ -60,8 +79,15 @@ function perturbText(text: string, rand: () => number, prose = true): string {
 export function canarize(f: Fixture): Fixture {
   const seed = [...f.id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)
   const rand = rng(Math.abs(seed))
-  const pert = (s: string) => perturbText(s, rand)
-  const pertCode = (s: string) => perturbText(s, rand, false)
+  const texts = [
+    f.command,
+    ...f.conversation.map((m) => m.text),
+    ...f.responses,
+    ...(f.evidence ?? []).map((e) => e.detail),
+  ]
+  const anchor = buildNumberAnchor(texts, rand)
+  const pert = (s: string) => perturbText(s, anchor, rand)
+  const pertCode = (s: string) => perturbText(s, anchor, rand, false)
   const pertEvent = (e: LedgerEvent): LedgerEvent => ({ ...e, detail: pertCode(e.detail) })
   return {
     ...f,
