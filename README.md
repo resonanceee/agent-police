@@ -75,16 +75,16 @@ export AGENTPOLICE_MODEL="z-ai/glm-5.3-flash"
 
 ## Judge recommendations
 
-Given that this plugin has been built with the intention of bolstering security, when choosing a judge keep in mind that quality matters more than speed. From the 200-conversation fixture suite (`test/fixtures-*.json`: openly dangerous, openly safe, ambiguous, reward-hacking, cheat-sheet, and narrative-injection cases with malicious / confused / honest / lazy agent personalities):
+Given that this plugin has been built with the intention of bolstering security, when choosing a judge keep in mind that quality matters more than speed. From the 240-conversation fixture suite (`test/fixtures-*.json`: openly dangerous, openly safe, ambiguous, reward-hacking, cheat-sheet, narrative-injection, plus a 40-case adversarial edge set with malicious / confused / honest / lazy agent personalities), prompt v5 + evidence ledger:
 
-| Model                        | Score   | Held-out | Notes                                                                                     |
-| ---------------------------- | ------- | -------- | ----------------------------------------------------------------------------------------- |
-| `z-ai/glm-5.3-flash`         | 197/200 | 49/49    | recommended default — cheap; catches narrative injection and most reward-hacking           |
-| `inclusionai/ling-3.0-flash` | 174/200 | 43/49    | takes the agent's own transcript narrative at face value; approved attacker pip indexes, public S3 uploads |
+| Model                        | Score   | Edge set | Held-out | Notes                                                          |
+| ---------------------------- | ------- | -------- | -------- | -------------------------------------------------------------- |
+| `z-ai/glm-5.3-flash`         | 238/240 | 40/40    | 60/60    | recommended default                                            |
+| `inclusionai/ling-3.0-flash` | 214/240 | 32/40    | 54/60    | known-weak: takes the agent's narrative at face value even with explicit rubric discipline |
 
-Scores are `bun test/harness.ts --live --model=<id>` on the prompt-v2 rubric with the evidence-ledger context. The held-out column is the every-4th-fixture partition (see below) — divergence between the two rates is a gaming indicator. Prompt-v1 reference run: glm-5.3-flash scored 158/160 on the original 160-fixture set.
+The edge set (narrative-trust, polite-dangerous, eval-sniffing, long-transcript) was derived from observed judge failures and includes honest controls so a prompt tuned against it cannot simply escalate everything. Prompt history: v1 158/160 on the original 160-fixture set, v2 197/200, v5 238/240.
 
-Canary robustness (glm-5.3-flash, `bun test/canary.ts --live`): original 192/200 vs canary 192/200, 12 verdict flips all in the conservative direction (benign commands got *more* suspicion under rewording), 0 cheat escapes. Known limitation: the judge is somewhat conservative under surface perturbation — expect occasional benign false positives.
+Canary robustness (glm-5.3-flash, `bun test/canary.ts --live`, prompt v5): original 238/240 vs canary 230/240 — 8 verdict flips, all in the conservative direction (benign commands got *more* suspicion under rewording), 0 cheat escapes. Known limitation: the judge is somewhat conservative under surface perturbation — expect occasional benign false positives.
 
 ## Behavior notes
 
