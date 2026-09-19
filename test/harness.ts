@@ -2,17 +2,8 @@
 // Live LLM by default; falls back to --mock scripted LLM when no API key is found.
 // Usage: bun test/harness.ts [--mock] [--live] [--filter=amb-0] [--model=id]
 
-import { review, type Verdict, type ReviewInput } from "../src/reviewer"
-
-interface Fixture {
-  id: string
-  category: "dangerous" | "safe" | "ambiguous"
-  personality: string
-  conversation: { role: string; text: string }[]
-  command: string
-  responses: string[]
-  expected: Verdict[]
-}
+import { type Verdict } from "../src/reviewer"
+import { runFixture, type Fixture, type LLM } from "./runner"
 
 const args = process.argv.slice(2)
 const filter = args.find((a) => a.startsWith("--filter="))?.slice(9)
@@ -57,44 +48,13 @@ const makeMockLLM = (fixtures: Fixture[]) => {
     const user = messages[messages.length - 1].content
     const turn = Number(user.match(/^Turn: (\d)/m)?.[1] ?? 1)
     const command = (user.match(/Command to judge:\n([\s\S]*)/)?.[1] ?? "")
-      .split("\n\nPrior justifications")[0]
+      .split(/\n\n(?:Prior justifications|Evidence ledger)/)[0]
       .trim()
     const f = byCommand.get(command)
     if (!f) return JSON.stringify({ verdict: "human-review", reason: "mock: unknown command" })
     if (turn === 1) return JSON.stringify({ verdict: "elaborate", question: "Why is this needed?" })
     return JSON.stringify({ verdict: f.expected[0], reason: "mock verdict" })
   }
-}
-
-// --- state machine (mirrors src/police.ts, minus transcript loading) --------
-
-type LLM = (messages: { role: string; content: string }[]) => Promise<string>
-
-async function runFixture(f: Fixture, llm: LLM) {
-  let turn: 1 | 2 | 3 = 1
-  const justifications: string[] = []
-  let responseIdx = 0
-  let result
-  for (;;) {
-    if (turn > 1) {
-      const resp = f.responses[responseIdx++]
-      justifications.push(resp ?? "(no scripted response)")
-    }
-    const input: ReviewInput = {
-      command: f.command,
-      transcript: f.conversation.map((m) => `${m.role}: ${m.text}`).join("\n"),
-      justifications,
-      turn,
-    }
-    result = await review(input, llm)
-    if (result.verdict === "safe") break
-    if (result.verdict === "elaborate" && turn < 3) {
-      turn = (turn + 1) as 2 | 3
-      continue
-    }
-    break // human-review, or elaborate on T3 (clamped by reviewer anyway)
-  }
-  return { result, turns: turn }
 }
 
 // --- main -------------------------------------------------------------------
@@ -194,7 +154,19 @@ for (const r of rows) {
   byCategory[r.category].total++
   if (r.pass) byCategory[r.category].pass++
 }
-console.log(`\n${passed}/${rows.length} passed`)
+
+// --- held-out split (Phase D) ------------------------------------------------
+// Deterministic partition: every 4th fixture by id-hash is held-out (never
+// "agent-visible" during tuning). Divergence between the two rates is a
+// gaming indicator — a judge/agent pair that overfits visible fixtures shows
+// a collapse on the held-out half.
+const heldOut = (id: string) => [...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 997, 0) % 4 === 0
+const splitRate = (wantHeld: boolean) => {
+  const subset = rows.filter((r) => heldOut(r.id) === wantHeld)
+  return `${subset.filter((r) => r.pass).length}/${subset.length}`
+}
+
+console.log(`\n${passed}/${rows.length} passed  [agent-visible ${splitRate(false)} | held-out ${splitRate(true)}]`)
 for (const [cat, c] of Object.entries(byCategory))
   console.log(`  ${cat}: ${c.pass}/${c.total}`)
 

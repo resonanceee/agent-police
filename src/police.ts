@@ -1,4 +1,5 @@
 import { review, type ReviewResult, type Verdict } from "./reviewer"
+import { summarize } from "./ledger"
 
 export interface Pending {
   turn: 1 | 2 | 3
@@ -127,6 +128,7 @@ export async function handleBash(
       transcript: t.text,
       justifications: entry.justifications,
       turn: entry.turn,
+      evidence: summarize(sessionID),
     })
     if (r.verdict === "safe") {
       pending.delete(command)
@@ -144,7 +146,7 @@ export async function handleBash(
   }
 
   // fresh command — turn 1
-  const r = await review({ command, transcript: t.text, justifications: [], turn: 1 })
+  const r = await review({ command, transcript: t.text, justifications: [], turn: 1, evidence: summarize(sessionID) })
   if (r.verdict === "safe") return { allow: true }
   pending.set(command, {
     turn: 1,
