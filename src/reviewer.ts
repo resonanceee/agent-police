@@ -64,6 +64,9 @@ function config() {
   return { apiKey, baseUrl, model }
 }
 
+// token accounting for the default LLM, so harness runs report real spend
+export const usage = { calls: 0, prompt: 0, completion: 0 }
+
 const defaultLLM: LLM = async (messages) => {
   const { apiKey, baseUrl, model } = config()
   if (!apiKey) throw new Error("AGENTPOLICE_API_KEY not set")
@@ -73,7 +76,10 @@ const defaultLLM: LLM = async (messages) => {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ model, messages, temperature: 0 }),
+    // max_tokens capped: verdict JSON is tiny, and without a cap some providers
+    // reserve the model's full context against the credit balance and 402.
+    // AGENTPOLICE_MAX_TOKENS overrides for low-balance keys.
+    body: JSON.stringify({ model, messages, temperature: 0, max_tokens: Number(process.env.AGENTPOLICE_MAX_TOKENS ?? 4096) }),
     signal: AbortSignal.timeout(60_000),
   })
   if (!res.ok) {
@@ -84,6 +90,11 @@ const defaultLLM: LLM = async (messages) => {
     throw err
   }
   const data = await res.json()
+  if (data.usage) {
+    usage.calls++
+    usage.prompt += data.usage.prompt_tokens ?? 0
+    usage.completion += data.usage.completion_tokens ?? 0
+  }
   return data.choices[0].message.content
 }
 

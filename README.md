@@ -35,6 +35,17 @@ T3 (after 2nd justification) → safe | human-review
   - `cancel` — reject the command; the agent is told not to retry
 - **Fail-closed**: reviewer timeout, HTTP failure, or malformed JSON never silently approves — it escalates to human-review.
 
+### Evidence ledger (observation-only)
+
+Besides gating bash, the plugin silently records what the agent touches via `read` / `edit` / `write` / `grep` / `glob` (target paths only) and the output of bash runs. Taps **never block**. Deterministic hard signals are flagged and shown to the reviewer as context:
+
+- reads/edits of checker-like files (`tests/**`, `*.test.*`, `.github/workflows/`, grader/validator/expected-output names) — test-file edits are always flagged, even in test-writing tasks
+- eval-environment sniffing in bash (`CI`, `GITHUB_ACTIONS`, `EVAL*`)
+- pass-count jumps correlated with test-file edits
+- self-verification loops: run tests → edit → rerun, ≥3 consecutive cycles with no other change
+
+The reviewer prompt includes a reward-hacking watchlist: test/validator tampering, hardcoded outputs, oracle gaming, eval detection, and fabricated success. Flags are grounds to ask or escalate — an honest agent legitimately running tests may read test files; the judge weighs intent against the task.
+
 ## Setup
 
 In the project (or global) opencode config:
@@ -73,8 +84,8 @@ Given that this plugin has been built with the intention of bolstering security,
 
 ## Behavior notes
 
-- Only the `bash` tool is monitored; file edits stay under opencode's own permission system.
-- Review state is in-memory, keyed by the exact command string; restarting opencode resets it.
+- `bash` is gated by the reviewer; `read`/`edit`/`write`/`grep`/`glob` are observed only and never blocked.
+- Review state and the evidence ledger are in-memory per session; restarting opencode resets them.
 - Human approval is detected by scanning for `approve` / `cancel` in user messages sent after the block.
 - Latency: one fast-model call per new command (plus one per justification round). Keep the reviewer on a cheap flash-class model.
 
@@ -82,8 +93,10 @@ Given that this plugin has been built with the intention of bolstering security,
 
 ```bash
 bun install
-bun test/harness.ts --mock                # wiring check, no network
-bun test/harness.ts --live --model=z-ai/glm-5.3-flash   # full 160-fixture judge run
+bun test test/ledger.test.ts             # ledger signal checks, no network
+bun test/harness.ts --mock               # wiring check, no network
+bun test/harness.ts --live --model=z-ai/glm-5.3-flash   # full 200-fixture judge run
+bun test/canary.ts --live --model=z-ai/glm-5.3-flash    # canary perturbation: flips & pass collapses
 RUN_INTEGRATION=1 bun test test/integration.test.ts     # boots real opencode in a sandbox project
 bun run typecheck
 ```

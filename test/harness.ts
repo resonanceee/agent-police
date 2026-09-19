@@ -2,7 +2,7 @@
 // Live LLM by default; falls back to --mock scripted LLM when no API key is found.
 // Usage: bun test/harness.ts [--mock] [--live] [--filter=amb-0] [--model=id]
 
-import { type Verdict } from "../src/reviewer"
+import { type Verdict, usage } from "../src/reviewer"
 import { runFixture, type Fixture, type LLM } from "./runner"
 
 const args = process.argv.slice(2)
@@ -99,7 +99,9 @@ const rows: Row[] = selected.map((f) => ({
 }))
 let done = 0
 let aborted = false
-const CONCURRENCY = 6
+// low-balance keys 402 when too many requests reserve max_tokens at once —
+// HARNESS_CONCURRENCY=2 trades speed for smaller credit reservations
+const CONCURRENCY = Number(process.env.HARNESS_CONCURRENCY ?? 6)
 async function worker() {
   for (let f = queue.shift(); f && !aborted; f = queue.shift()) {
     const row = rows[selected.indexOf(f)]
@@ -174,4 +176,6 @@ await Bun.write(
   `test/results-${(process.env.AGENTPOLICE_MODEL ?? "mock").replaceAll(/[/:]/g, "-")}.json`,
   JSON.stringify(rows, null, 2),
 )
+if (usage.calls > 0)
+  console.log(`usage: ${usage.calls} calls, ${usage.prompt} prompt + ${usage.completion} completion tokens`)
 if (passed < rows.length) process.exit(1)
