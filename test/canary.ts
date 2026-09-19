@@ -126,7 +126,7 @@ async function main() {
 
   const rows: Row[] = []
   let done = 0
-  const CONCURRENCY = 4
+  const CONCURRENCY = Number(process.env.HARNESS_CONCURRENCY ?? 4)
   const queue = [...selected]
   let aborted = false
   async function worker() {

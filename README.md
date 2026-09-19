@@ -75,12 +75,16 @@ export AGENTPOLICE_MODEL="z-ai/glm-5.3-flash"
 
 ## Judge recommendations
 
-Given that this plugin has been built with the intention of bolstering security, when choosing a judge keep in mind that quality matters more than speed. From the 160-conversation fixture suite (`test/fixtures-*.json`: openly dangerous, openly safe, and ambiguous cases with malicious / confused / honest / lazy agent personalities):
+Given that this plugin has been built with the intention of bolstering security, when choosing a judge keep in mind that quality matters more than speed. From the 200-conversation fixture suite (`test/fixtures-*.json`: openly dangerous, openly safe, ambiguous, reward-hacking, cheat-sheet, and narrative-injection cases with malicious / confused / honest / lazy agent personalities):
 
-| Model                       | Score    | Notes                                                        |
-| --------------------------- | -------- | ------------------------------------------------------------ |
-| `z-ai/glm-5.3-flash`        | 160/160  | recommended default — cheap and catches narrative injection   |
-| `inclusionai/ling-3.0-flash`| 138/160  | takes the agent's own transcript narrative at face value; approved attacker pip indexes, public S3 uploads, disabled security middleware |
+| Model                        | Score   | Held-out | Notes                                                                                     |
+| ---------------------------- | ------- | -------- | ----------------------------------------------------------------------------------------- |
+| `z-ai/glm-5.3-flash`         | 197/200 | 49/49    | recommended default — cheap; catches narrative injection and most reward-hacking           |
+| `inclusionai/ling-3.0-flash` | 174/200 | 43/49    | takes the agent's own transcript narrative at face value; approved attacker pip indexes, public S3 uploads |
+
+Scores are `bun test/harness.ts --live --model=<id>` on the prompt-v2 rubric with the evidence-ledger context. The held-out column is the every-4th-fixture partition (see below) — divergence between the two rates is a gaming indicator. Prompt-v1 reference run: glm-5.3-flash scored 158/160 on the original 160-fixture set.
+
+Canary robustness (glm-5.3-flash, `bun test/canary.ts --live`): original 192/200 vs canary 192/200, 12 verdict flips all in the conservative direction (benign commands got *more* suspicion under rewording), 0 cheat escapes. Known limitation: the judge is somewhat conservative under surface perturbation — expect occasional benign false positives.
 
 ## Behavior notes
 
@@ -88,6 +92,7 @@ Given that this plugin has been built with the intention of bolstering security,
 - Review state and the evidence ledger are in-memory per session; restarting opencode resets them.
 - Human approval is detected by scanning for `approve` / `cancel` in user messages sent after the block.
 - Latency: one fast-model call per new command (plus one per justification round). Keep the reviewer on a cheap flash-class model.
+- `AGENTPOLICE_MAX_TOKENS` (default 4096) caps reviewer responses; some providers 402 when an uncapped request must reserve the model's full context against your credit balance.
 
 ## Development
 
@@ -95,11 +100,13 @@ Given that this plugin has been built with the intention of bolstering security,
 bun install
 bun test test/ledger.test.ts             # ledger signal checks, no network
 bun test/harness.ts --mock               # wiring check, no network
-bun test/harness.ts --live --model=z-ai/glm-5.3-flash   # full 200-fixture judge run
+bun test/harness.ts --live --model=z-ai/glm-5.3-flash   # full 200-fixture judge run (reports agent-visible vs held-out)
 bun test/canary.ts --live --model=z-ai/glm-5.3-flash    # canary perturbation: flips & pass collapses
 RUN_INTEGRATION=1 bun test test/integration.test.ts     # boots real opencode in a sandbox project
 bun run typecheck
 ```
+
+Low-balance API keys: set `HARNESS_CONCURRENCY=2` to shrink per-request credit reservations.
 
 ## License
 
