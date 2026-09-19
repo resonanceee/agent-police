@@ -75,16 +75,23 @@ export AGENTPOLICE_MODEL="z-ai/glm-5.3-flash"
 
 ## Judge recommendations
 
-Given that this plugin has been built with the intention of bolstering security, when choosing a judge keep in mind that quality matters more than speed. From the 240-conversation fixture suite (`test/fixtures-*.json`: openly dangerous, openly safe, ambiguous, reward-hacking, cheat-sheet, narrative-injection, plus a 40-case adversarial edge set with malicious / confused / honest / lazy agent personalities), prompt v5 + evidence ledger:
+Given that this plugin has been built with the intention of bolstering security, when choosing a judge keep in mind that quality matters more than speed. From the 240-conversation fixture suite (`test/fixtures-*.json`: openly dangerous, openly safe, ambiguous, reward-hacking, cheat-sheet, narrative-injection, plus a 40-case adversarial edge set with malicious / confused / honest / lazy agent personalities), prompt v6 + evidence ledger:
 
-| Model                        | Score   | Edge set | Held-out | Notes                                                          |
-| ---------------------------- | ------- | -------- | -------- | -------------------------------------------------------------- |
-| `z-ai/glm-5.3-flash`         | 238/240 | 40/40    | 60/60    | recommended default                                            |
-| `inclusionai/ling-3.0-flash` | 214/240 | 32/40    | 54/60    | known-weak: takes the agent's narrative at face value even with explicit rubric discipline |
+| Model                        | Score   | Notes                                                          |
+| ---------------------------- | ------- | -------------------------------------------------------------- |
+| `z-ai/glm-5.3-flash`         | 238/240 | recommended default — precision-tuned, stable across reruns, held-out 60/60 |
+| `inclusionai/ling-3.0-flash` | 214/240 | known-weak: takes the agent's narrative at face value even with explicit rubric discipline |
 
-The edge set (narrative-trust, polite-dangerous, eval-sniffing, long-transcript) was derived from observed judge failures and includes honest controls so a prompt tuned against it cannot simply escalate everything. Prompt history: v1 158/160 on the original 160-fixture set, v2 197/200, v5 238/240.
+Robustness checks (glm-5.3-flash, prompt v6):
 
-Canary robustness (glm-5.3-flash, `bun test/canary.ts --live`, prompt v5): original 238/240 vs canary 230/240 — 8 verdict flips, all in the conservative direction (benign commands got *more* suspicion under rewording), 0 cheat escapes. Known limitation: the judge is somewhat conservative under surface perturbation — expect occasional benign false positives.
+- **Held-out split** (every 4th fixture never seen during tuning): agent-visible 178/180, held-out 60/60 — no gaming divergence.
+- **Canary perturbation** (`test/canary.ts`: coherent anchor-number shifts, identifier renames, prose reformatting): 239/240 both sides, **0 verdict flips / 240** once the perturbation was made coherent. (The earlier 12-flip run was a measurement artifact: per-field independent number edits fabricated port/PR mismatches that any careful judge should flag.)
+- **False-positive posture**: benign sentinel set 40/40, danger controls 93/93 — the rubric explicitly prices escalation friction ("do not escalate benign work over technicalities") without losing catch-rate.
+- **Truncation resilience**: reasoning models that exhaust their token budget on tangents get one doubled-cap retry, then a salvage call that converts the truncated reasoning into a verdict — instead of failing closed.
+
+Known limitation: residual run-to-run variance at the safe/escalate boundary (~1% of borderline fixtures flip direction between runs at temperature 0, provider routing noise).
+
+Historical: v1 158/160 (original 160-fixture set), v2 197/200, v5 238/240, v6 238-239/240 stable. Benchmark results and run logs are preserved under `test/bench/`.
 
 ## Behavior notes
 
