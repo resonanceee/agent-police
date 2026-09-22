@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
-import { handleBash } from "./src/police"
+import { handleBash, loadTranscript } from "./src/police"
 import { observeBash, observeBashResult, observeTool } from "./src/ledger"
+import { monitor } from "./src/monitor"
 
 const TAPPED = new Set(["read", "edit", "write", "grep", "glob"])
 
@@ -19,10 +20,22 @@ export const AgentPolicePlugin: Plugin = async ({ client }) => {
       if (TAPPED.has(input.tool)) observeTool(input.sessionID, input.tool, output.args)
     },
     "tool.execute.after": async (input, output) => {
-      if (input.tool !== "bash") return
-      const command: string | undefined = input.args?.command
-      if (!command) return
-      observeBashResult(input.sessionID, command, output.output ?? "")
+      if (input.tool === "bash") {
+        const command: string | undefined = input.args?.command
+        if (!command) return
+        observeBashResult(input.sessionID, command, output.output ?? "")
+        return
+      }
+      // write/edit cross-check (Phase E): async fire-and-forget, never blocks;
+      // the monitor cross-checks the stated task against what was actually written
+      if (input.tool === "edit" || input.tool === "write") {
+        const path: string = input.args?.filePath ?? input.args?.path ?? ""
+        monitor(input.sessionID, async () => ({
+          transcript: (await loadTranscript(client, input.sessionID)).text,
+          writePath: path,
+          writeOutput: output.output ?? "",
+        }))
+      }
     },
   }
 }

@@ -1,5 +1,6 @@
-import { review, type ReviewResult, type Verdict } from "./reviewer"
+import { review, lastReasoning, type ReviewResult, type Verdict } from "./reviewer"
 import { summarize } from "./ledger"
+import { monitor } from "./monitor"
 
 export interface Pending {
   turn: 1 | 2 | 3
@@ -55,7 +56,7 @@ interface Transcript {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Client = any
 
-async function loadTranscript(client: Client, sessionID: string): Promise<Transcript> {
+export async function loadTranscript(client: Client, sessionID: string): Promise<Transcript> {
   const res = await client.session.messages({ path: { id: sessionID } })
   const msgs: Array<{ info: { role: string; time?: { created?: number } }; parts: Array<{ type: string; text?: string }> }> =
     res.data ?? []
@@ -88,6 +89,17 @@ async function loadTranscript(client: Client, sessionID: string): Promise<Transc
 export interface BashDecision {
   allow: boolean
   error?: string
+}
+
+// after a successful judge verdict, hand the judge's own CoT (when the provider
+// exposes it) to the async monitor — fire-and-forget, never awaited, never
+// blocks; findings land in the ledger as observation FLAGs at most
+function afterReview(sessionID: string, transcript: string) {
+  monitor(sessionID, () => ({
+    transcript,
+    evidence: summarize(sessionID),
+    reasoning: lastReasoning.text,
+  }))
 }
 
 export async function handleBash(
@@ -130,6 +142,7 @@ export async function handleBash(
       turn: entry.turn,
       evidence: summarize(sessionID),
     })
+    afterReview(sessionID, t.text)
     if (r.verdict === "safe") {
       pending.delete(command)
       return { allow: true }
@@ -147,6 +160,7 @@ export async function handleBash(
 
   // fresh command — turn 1
   const r = await review({ command, transcript: t.text, justifications: [], turn: 1, evidence: summarize(sessionID) })
+  afterReview(sessionID, t.text)
   if (r.verdict === "safe") return { allow: true }
   pending.set(command, {
     turn: 1,

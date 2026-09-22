@@ -79,6 +79,10 @@ function config() {
 // token accounting for the default LLM, so harness runs report real spend
 export const usage = { calls: 0, prompt: 0, completion: 0 }
 
+// last CoT the provider exposed on a judge call ("" when none). Consumed by
+// the Phase E monitor; never surfaces to the agent.
+export const lastReasoning = { text: "" }
+
 const defaultLLM: LLM = async (messages) => {
   const { apiKey, baseUrl, model } = config()
   if (!apiKey) throw new Error("AGENTPOLICE_API_KEY not set")
@@ -137,6 +141,8 @@ const defaultLLM: LLM = async (messages) => {
       )
     }
   }
+  const r = reasoning(data)
+  if (typeof r === "string" && r) lastReasoning.text = r
   return content(data)
 }
 
@@ -187,6 +193,7 @@ export async function review(
   input: ReviewInput,
   llm: LLM = defaultLLM,
 ): Promise<ReviewResult> {
+  lastReasoning.text = "" // stale CoT must never be cross-checked against a later command
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: userPrompt(input) },

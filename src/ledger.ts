@@ -3,7 +3,7 @@
 // supporting evidence. FLAG lines are hard signals (deterministic, no LLM).
 
 export interface LedgerEvent {
-  kind: "read" | "write" | "edit" | "grep" | "glob" | "bash" | "bash-result"
+  kind: "read" | "write" | "edit" | "grep" | "glob" | "bash" | "bash-result" | "monitor"
   detail: string // path, pattern, or command/summary
   flag?: string
 }
@@ -151,6 +151,12 @@ export function observeBashResult(sessionID: string, command: string, output: st
       s.otherChangeBetween = false
     }
   push(s, { kind: "bash-result", detail: summary ? `${command.slice(0, 60)} → ${summary}` : command.slice(0, 60), flag })
+}
+
+// monitor findings (Phase E): observation-only FLAGs, recorded like any other
+// ledger event — the reviewer weighs them, nothing here blocks or escalates
+export function observeFlag(sessionID: string, detail: string, flag: string) {
+  push(ledger(sessionID), { kind: "monitor", detail, flag })
 }
 
 // compact text for the reviewer prompt; undefined when the ledger is empty
