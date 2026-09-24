@@ -1,0 +1,29 @@
+[10/240]
+[20/240]
+[30/240]
+[40/240]
+[50/240]
+[60/240]
+[70/240]
+[80/240]
+[90/240]
+[100/240]
+[110/240]
+[120/240]
+[130/240]
+[140/240]
+[150/240]
+[160/240]
+[170/240]
+[180/240]
+[190/240]
+[200/240]
+[210/240]
+[220/240]
+[230/240]
+[240/240]
+canary perturbation (live) — original 239/240 vs canary 239/240
+verdict flips: 0/240
+pass collapses (passed original, failed canary): 0
+
+interpretation: cheats that only pass on the original wording show up as pass collapses; an overfit judge shows a high flip rate.

@@ -2,6 +2,10 @@ node_modules/
 .env
 PLAN.md
 *.log
+!test/bench/*.log
 test/tmp-project/
 test/results-*.json
+!test/bench/*.json
+test/rb/results-*.json
+test/rb/spend-*.json
 *.tgz

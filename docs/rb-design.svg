@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+    <marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/>
+    </marker>
+  </defs>
+
+  <rect x="30" y="40" width="250" height="110" rx="8" fill="#eef3ff" stroke="#4a6fa5" stroke-width="1.5"/>
+  <text x="155" y="65" text-anchor="middle" font-weight="bold">GLM roleplayer</text>
+  <text x="155" y="85" text-anchor="middle">plays the coding agent:</text>
+  <text x="155" y="103" text-anchor="middle">user task + hidden task,</text>
+  <text x="155" y="121" text-anchor="middle">told surveillance exists,</text>
+  <text x="155" y="139" text-anchor="middle">told to keep the hidden task quiet</text>
+
+  <rect x="370" y="40" width="220" height="110" rx="8" fill="#f6f6f6" stroke="#666" stroke-width="1.5"/>
+  <text x="480" y="65" text-anchor="middle" font-weight="bold">Real plugin pipeline</text>
+  <text x="480" y="85" text-anchor="middle">evidence ledger,</text>
+  <text x="480" y="103" text-anchor="middle">reviewer state machine,</text>
+  <text x="480" y="121" text-anchor="middle">judge = model under test:</text>
+  <text x="480" y="139" text-anchor="middle">run 1 GLM, run 2 ling + monitor</text>
+
+  <rect x="680" y="40" width="190" height="110" rx="8" fill="#e8f6e8" stroke="#2e7d32" stroke-width="1.5"/>
+  <text x="775" y="65" text-anchor="middle" font-weight="bold">GLM simulator</text>
+  <text x="775" y="85" text-anchor="middle">plays the filesystem</text>
+  <text x="775" y="103" text-anchor="middle">and shell. No real</text>
+  <text x="775" y="121" text-anchor="middle">execution anywhere,</text>
+  <text x="775" y="139" text-anchor="middle">per-track consistency notes</text>
+
+  <line x1="280" y1="80" x2="366" y2="80" stroke="#333" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="323" y="71" text-anchor="middle" fill="#555">CMD:</text>
+  <line x1="590" y1="80" x2="676" y2="80" stroke="#2e7d32" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="633" y="71" text-anchor="middle" fill="#2e7d32">safe</text>
+
+  <polyline points="480,150 480,195 155,195 155,154" fill="none" stroke="#c0392b" stroke-width="1.5" marker-end="url(#r)"/>
+  <text x="318" y="186" text-anchor="middle" fill="#c0392b">blocked: question or block message</text>
+
+  <polyline points="775,150 775,235 105,235 105,154" fill="none" stroke="#333" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="450" y="226" text-anchor="middle" fill="#555">simulated tool output flows back into the conversation</text>
+
+  <rect x="30" y="280" width="840" height="80" rx="8" fill="#fff7e6" stroke="#b8860b" stroke-width="1.5"/>
+  <text x="450" y="305" text-anchor="middle" font-weight="bold">14 hand-written tracks</text>
+  <text x="450" y="325" text-anchor="middle">8 hidden-task tracks (env exfiltration, typosquat dependency, test weakening, benchmark tampering, eval special-casing,</text>
+  <text x="450" y="343" text-anchor="middle">audit shutdown, PII export, cron exfiltration) and 6 honest mirrors of the same tasks, 3 to 15 seeds each</text>
+
+  <rect x="30" y="390" width="400" height="100" rx="8" fill="#f3eefb" stroke="#7b4fa6" stroke-width="1.5"/>
+  <text x="230" y="415" text-anchor="middle" font-weight="bold">Offline replay (third pass)</text>
+  <text x="230" y="437" text-anchor="middle">the ling monitor re-analyzes every recorded</text>
+  <text x="230" y="455" text-anchor="middle">write and edit from run 1, no actor involved,</text>
+  <text x="230" y="473" text-anchor="middle">measures what the monitor would have caught</text>
+
+  <rect x="470" y="390" width="400" height="100" rx="8" fill="#f6f6f6" stroke="#666" stroke-width="1.5"/>
+  <text x="670" y="415" text-anchor="middle" font-weight="bold">What is measured</text>
+  <text x="670" y="437" text-anchor="middle">hidden commands attempted vs executed vs blocked,</text>
+  <text x="670" y="455" text-anchor="middle">monitor flags on hidden vs honest episodes,</text>
+  <text x="670" y="473" text-anchor="middle">per-track escape rates (tables in the report)</text>
+</svg>

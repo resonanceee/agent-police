@@ -2,20 +2,12 @@
 // Live LLM by default; falls back to --mock scripted LLM when no API key is found.
 // Usage: bun test/harness.ts [--mock] [--live] [--filter=amb-0] [--model=id]
 
-import { review, type Verdict, type ReviewInput } from "../src/reviewer"
-
-interface Fixture {
-  id: string
-  category: "dangerous" | "safe" | "ambiguous"
-  personality: string
-  conversation: { role: string; text: string }[]
-  command: string
-  responses: string[]
-  expected: Verdict[]
-}
+import { type Verdict, usage } from "../src/reviewer"
+import { runFixture, type Fixture, type LLM } from "./runner"
 
 const args = process.argv.slice(2)
 const filter = args.find((a) => a.startsWith("--filter="))?.slice(9)
+const idsArg = args.find((a) => a.startsWith("--ids="))?.slice(6)
 const wantsMock = args.includes("--mock")
 const wantsLive = args.includes("--live")
 const modelArg = args.find((a) => a.startsWith("--model="))?.slice(8)
@@ -57,44 +49,13 @@ const makeMockLLM = (fixtures: Fixture[]) => {
     const user = messages[messages.length - 1].content
     const turn = Number(user.match(/^Turn: (\d)/m)?.[1] ?? 1)
     const command = (user.match(/Command to judge:\n([\s\S]*)/)?.[1] ?? "")
-      .split("\n\nPrior justifications")[0]
+      .split(/\n\n(?:Prior justifications|Evidence ledger)/)[0]
       .trim()
     const f = byCommand.get(command)
     if (!f) return JSON.stringify({ verdict: "human-review", reason: "mock: unknown command" })
     if (turn === 1) return JSON.stringify({ verdict: "elaborate", question: "Why is this needed?" })
     return JSON.stringify({ verdict: f.expected[0], reason: "mock verdict" })
   }
-}
-
-// --- state machine (mirrors src/police.ts, minus transcript loading) --------
-
-type LLM = (messages: { role: string; content: string }[]) => Promise<string>
-
-async function runFixture(f: Fixture, llm: LLM) {
-  let turn: 1 | 2 | 3 = 1
-  const justifications: string[] = []
-  let responseIdx = 0
-  let result
-  for (;;) {
-    if (turn > 1) {
-      const resp = f.responses[responseIdx++]
-      justifications.push(resp ?? "(no scripted response)")
-    }
-    const input: ReviewInput = {
-      command: f.command,
-      transcript: f.conversation.map((m) => `${m.role}: ${m.text}`).join("\n"),
-      justifications,
-      turn,
-    }
-    result = await review(input, llm)
-    if (result.verdict === "safe") break
-    if (result.verdict === "elaborate" && turn < 3) {
-      turn = (turn + 1) as 2 | 3
-      continue
-    }
-    break // human-review, or elaborate on T3 (clamped by reviewer anyway)
-  }
-  return { result, turns: turn }
 }
 
 // --- main -------------------------------------------------------------------
@@ -104,9 +65,12 @@ const files = (await Array.fromAsync(new Bun.Glob("fixtures-*.json").scan({ cwd:
   .map((f) => `test/${f}`)
 const fixtures: Fixture[] = []
 for (const f of files) fixtures.push(...((await Bun.file(f).json()) as Fixture[]))
-const selected = filter ? fixtures.filter((f) => f.id.includes(filter)) : fixtures
+const selected0 = filter ? fixtures.filter((f) => f.id.includes(filter)) : fixtures
+const selected = idsArg
+  ? selected0.filter((f) => idsArg.split(",").includes(f.id))
+  : selected0
 if (selected.length === 0) {
-  console.error(`no fixtures match filter "${filter}"`)
+  console.error(`no fixtures match filter "${filter ?? idsArg}"`)
   process.exit(1)
 }
 
@@ -131,6 +95,8 @@ interface Row {
   turns: number
   verdict: Verdict
   pass: boolean
+  ms?: number
+  info?: string
   note?: string
 }
 
@@ -139,10 +105,13 @@ const rows: Row[] = selected.map((f) => ({
 }))
 let done = 0
 let aborted = false
-const CONCURRENCY = 6
+// low-balance keys 402 when too many requests reserve max_tokens at once —
+// HARNESS_CONCURRENCY=2 trades speed for smaller credit reservations
+const CONCURRENCY = Number(process.env.HARNESS_CONCURRENCY ?? 6)
 async function worker() {
   for (let f = queue.shift(); f && !aborted; f = queue.shift()) {
     const row = rows[selected.indexOf(f)]
+    const t0 = Date.now()
     try {
       const { result, turns } = await runFixture(f, llm!)
       const pass = f.expected.includes(result.verdict)
@@ -150,9 +119,12 @@ async function worker() {
         turns,
         verdict: result.verdict,
         pass,
+        ms: Date.now() - t0,
+        info: result.reason, // kept on pass too — jev probabilities enable offline threshold sweeps
         note: pass ? undefined : `expected ${f.expected.join("|")}${result.reason ? ` — ${result.reason}` : ""}`,
       })
     } catch (e) {
+      row.ms = Date.now() - t0
       const msg = e instanceof Error ? e.message : String(e)
       if ((e as { creditLimit?: boolean }).creditLimit) {
         aborted = true
@@ -169,6 +141,7 @@ async function worker() {
   }
 }
 const queue = [...selected]
+const wallT0 = Date.now()
 await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()))
 
 // --- report -----------------------------------------------------------------
@@ -194,12 +167,33 @@ for (const r of rows) {
   byCategory[r.category].total++
   if (r.pass) byCategory[r.category].pass++
 }
-console.log(`\n${passed}/${rows.length} passed`)
+
+// --- held-out split (Phase D) ------------------------------------------------
+// Deterministic partition: every 4th fixture by id-hash is held-out (never
+// "agent-visible" during tuning). Divergence between the two rates is a
+// gaming indicator — a judge/agent pair that overfits visible fixtures shows
+// a collapse on the held-out half.
+const heldOut = (id: string) => [...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 997, 0) % 4 === 0
+const splitRate = (wantHeld: boolean) => {
+  const subset = rows.filter((r) => heldOut(r.id) === wantHeld)
+  return `${subset.filter((r) => r.pass).length}/${subset.length}`
+}
+
+console.log(`\n${passed}/${rows.length} passed  [agent-visible ${splitRate(false)} | held-out ${splitRate(true)}]`)
 for (const [cat, c] of Object.entries(byCategory))
   console.log(`  ${cat}: ${c.pass}/${c.total}`)
 
+// filtered/ids runs write a suffixed file so the full-run results are never clobbered
+const suffix = filter || idsArg ? `-partial-${Date.now()}` : ""
 await Bun.write(
-  `test/results-${(process.env.AGENTPOLICE_MODEL ?? "mock").replaceAll(/[/:]/g, "-")}.json`,
+  `test/results-${(process.env.AGENTPOLICE_MODEL ?? "mock").replaceAll(/[/:]/g, "-")}${suffix}.json`,
   JSON.stringify(rows, null, 2),
 )
+if (usage.calls > 0)
+  console.log(`usage: ${usage.calls} calls, ${usage.prompt} prompt + ${usage.completion} completion tokens`)
+const fixtureMs = rows.map((r) => r.ms).filter((x): x is number => x != null).sort((a, b) => a - b)
+if (fixtureMs.length)
+  console.log(
+    `speed: fixture p50=${Math.round(fixtureMs[Math.floor(fixtureMs.length / 2)] / 1000)}s p95=${Math.round(fixtureMs[Math.floor((fixtureMs.length * 95) / 100)] / 1000)}s | wall ${((Date.now() - wallT0) / 60_000).toFixed(1)}min (${(fixtureMs.length / ((Date.now() - wallT0) / 60_000)).toFixed(1)} fixtures/min)`,
+  )
 if (passed < rows.length) process.exit(1)
