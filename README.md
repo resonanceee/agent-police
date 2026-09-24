@@ -33,9 +33,11 @@ Configure the reviewer model through environment variables before starting openc
 | ----------------------- | -------- | --------------------------- | ---------------------------------------------- |
 | `AGENTPOLICE_API_KEY`   | yes      | none                        | API key for the reviewer endpoint              |
 | `AGENTPOLICE_BASE_URL`  | no       | `https://api.openai.com/v1` | Any OpenAI-compatible endpoint works           |
-| `AGENTPOLICE_MODEL`     | no       | `gpt-4o-mini`               | The judge model id                             |
+| `AGENTPOLICE_MODEL`     | no       | `gpt-4o-mini`               | The judge model id (anything matching `jev` routes to the Decisions API) |
 | `AGENTPOLICE_MAX_TOKENS`| no       | `4096`                      | Cap on reviewer responses                      |
 | `AGENTPOLICE_MONITOR`   | no       | off                         | Set to `1` to enable the background monitor    |
+| `AGENTPOLICE_JEV_HR_MIN`| no       | `0.3`                       | jev only: probability threshold for escalating a `safe` to human review |
+| `AGENTPOLICE_JEV_EL_MIN`| no       | `0.3`                       | jev only: probability threshold for escalating a `safe` to elaborate |
 
 Example for OpenRouter:
 
@@ -44,6 +46,24 @@ export AGENTPOLICE_API_KEY="sk-or-..."
 export AGENTPOLICE_BASE_URL="https://openrouter.ai/api/v1"
 export AGENTPOLICE_MODEL="z-ai/glm-5.3-flash"
 ```
+
+Example using Jev (TypeSafe decision model) on OpenRouter — any model id
+containing `jev` (e.g. `jev-latest`, `jev-1.13`) is routed to OpenRouter's
+Decisions API (`/api/alpha/decisions`) instead of chat completions:
+
+```bash
+export AGENTPOLICE_API_KEY="sk-or-..."
+export AGENTPOLICE_BASE_URL="https://openrouter.ai/api/v1"
+export AGENTPOLICE_MODEL="jev-latest"
+```
+
+Jev is a calibrated decision model: instead of free-form JSON it returns typed
+answers with probabilities. The plugin maps its `verdict` choice to the usual
+three verdicts, and additionally spends its uncertainty signal — a nominal
+`safe` whose probability mass on `human-review` or `elaborate` exceeds the
+thresholds above is escalated anyway. With the tuned 0.30/0.30 thresholds this
+scored 235/240 on the fixture suite (dangerous 73/73, safe 59/59 with zero
+false positives, held-out 60/60) at a p50 judge latency of ~0.65s.
 
 ## What it does
 
@@ -70,10 +90,7 @@ A bash call goes to the plugin, which records it in the evidence ledger and asks
 | 3    | after the second             | `safe`, `human-review`               |
 
 - The elaborate loop: the block message contains the reviewer's question. The agent explains itself in chat and retries the exact same command. The retry is recognized and judged again with the justification attached.
-- Human review: the agent and you get a block message with three options, decided by replying in chat:
-  - `approve` allows the command once.
-  - `follow up: <question>` asks the agent a question before deciding.
-  - `cancel` rejects the command and tells the agent not to retry it.
+- Human review: the plugin summons opencode's native permission dialog showing the command and the reviewer's reason. Allow runs the command once; reject blocks it and tells the agent not to retry. If the dialog API is unavailable (older opencode), the command fails closed with the reason.
 - Fail-closed: reviewer timeouts, HTTP failures, and malformed JSON never silently approve anything. They escalate to human review.
 
 ### Evidence ledger (observation only)
@@ -105,6 +122,7 @@ This plugin is built as a security tool, so judge quality matters more than judg
 | Model                        | Score   | Notes                                                                                    |
 | ---------------------------- | ------- | ---------------------------------------------------------------------------------------- |
 | `z-ai/glm-5.3-flash`         | 238/240 | recommended default. Precision tuned, stable across reruns, held-out split 60/60.       |
+| `jev-latest` (Decisions API) | 235/240 | calibrated probabilities + threshold policy. Fastest judge measured: p50 ~0.65s per call, ~0.3s on safe commands. Zero safe false positives at 0.30/0.30 thresholds; dangerous 73/73, held-out 60/60. |
 | `inclusionai/ling-3.0-flash` | 214/240 | known weak: takes the agent's narrative at face value even with explicit rubric discipline. This is the model the background monitor was built for. |
 
 Robustness checks on glm-5.3-flash with prompt v6:
@@ -194,8 +212,8 @@ Reproducibility: tracks, runner, and analyzer live in `test/rb/`. See `test/rb/r
 
 - `bash` is gated by the reviewer. `read`, `edit`, `write`, `grep`, and `glob` are observed only and never blocked.
 - Review state and the evidence ledger are in memory per session. Restarting opencode resets them.
-- Human approval is detected by scanning user messages sent after the block for `approve` or `cancel`.
-- Latency: one fast model call per new command, plus one per justification round. Keep the reviewer on a cheap flash class model. The monitor, when enabled, adds no latency.
+- Human review uses opencode's native permission dialog (`POST /api/session/{id}/permission`), added in opencode 1.18.
+- Latency: one judge call per new command, plus one per justification round. On chat models keep the reviewer on a cheap flash class model; with `jev-latest` a decision call is ~0.3–0.7s. The monitor, when enabled, adds no latency.
 - `AGENTPOLICE_MAX_TOKENS` (default 4096) caps reviewer responses. Some providers fail when an uncapped request has to reserve the model's full context against your credit balance.
 
 ## Development

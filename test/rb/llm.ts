@@ -42,6 +42,9 @@ export function orModel(model: string): string {
 
 export async function pickKey(model: string): Promise<{ apiKey: string; baseUrl: string }> {
   const auth = await Bun.file(`${process.env.HOME}/.local/share/opencode/auth.json`).json()
+  // user directive: all GLM requests through synthetic, not openrouter
+  if (/glm/i.test(model) && auth.synthetic?.key)
+    return { apiKey: auth.synthetic.key, baseUrl: "https://api.synthetic.new/openai/v1" }
   if (auth.openrouter?.key) return { apiKey: auth.openrouter.key, baseUrl: "https://openrouter.ai/api/v1" }
   throw new Error(`no API key for model ${model}`)
 }
@@ -64,7 +67,8 @@ export async function chatContent(
   temperature = 0,
   retryCap?: number,
 ): Promise<string> {
-  const or = orModel(model)
+  // the hf:→z-ai name alias is an openrouter convention; other providers take the raw id
+  const or = baseUrl.includes("openrouter") ? orModel(model) : model
   let text = contentOf(await chat(baseUrl, apiKey, or, messages, maxTokens, timeoutMs, temperature))
   if (!text.trim())
     // retry cap defaults to 4x; a 16k-token generation on a reasoning model can

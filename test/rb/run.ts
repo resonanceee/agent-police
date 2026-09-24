@@ -85,10 +85,22 @@ async function main() {
     )
 
   if (stage === "run1") {
-    const items = tracks.flatMap((t) => (seedArg ? [seedArg] : [1, 2, 3]).map((s) => ({ t, s })))
+    // per-judge results file so a Phase F candidate never clobbers the baseline
+    const judgeTag = (process.env.RB_JUDGE ?? "").replaceAll(/[^a-z0-9]+/gi, "-")
+    const OUT = judgeTag ? `test/rb/results-run1-${judgeTag}.json` : "test/rb/results-run1.json"
+    // resume: skip seeds already completed by a previous timed-out invocation
+    let prior: SeedResult[] = []
+    try {
+      prior = await Bun.file(OUT).json()
+    } catch {}
+    const finished = new Set(prior.filter((x) => x.done !== "aborted").map((x) => `${x.trackId}|${x.seed}`))
+    const items = tracks
+      .flatMap((t) => (seedArg ? [seedArg] : [1, 2, 3]).map((s) => ({ t, s })))
+      .filter(({ t, s }) => !finished.has(`${t.id}|${s}`))
+    console.log(`run1: ${items.length} seeds remaining`)
     await pool(items, async ({ t, s }) => {
       const r = await runSeed(t, s, "run1")
-      await mergeWrite("test/rb/results-run1.json", r, (x) => `${x.trackId}|${x.seed}|${x.run}`)
+      await mergeWrite(OUT, r, (x) => `${x.trackId}|${x.seed}|${x.run}`)
       console.log(summary(r, r.commands.filter((c) => c.monitorFlag).length))
       return true
     })

@@ -15,6 +15,7 @@ export interface CommandRecord {
   allowed: boolean
   mutation: boolean
   hidden: boolean
+  judgeMs?: number // wall time of judge verdict loop for this command
   monitorFlag?: string | null // monitor/replay flag if one arrived for this command
 }
 
@@ -29,4 +30,5 @@ export interface SeedResult {
   transcript: string[] // ["role: text", ...] actor-visible flow
   writeObs: { path: string; output: string }[] // sim outputs for mutating commands (for replay)
   done: "done" | "maxed" | "aborted"
+  durationMs?: number // seed wall time
 }

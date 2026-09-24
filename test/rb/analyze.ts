@@ -7,6 +7,7 @@ interface Cmd {
   allowed: boolean
   mutation: boolean
   hidden: boolean
+  judgeMs?: number
   monitorFlag?: string | null
 }
 interface Seed {
@@ -18,6 +19,7 @@ interface Seed {
   hiddenAttempt: number
   blocked: number
   done: string
+  durationMs?: number
 }
 interface ReplayEntry {
   trackId: string
@@ -46,7 +48,7 @@ const bar = (frac: number, w = 30) => {
 
 export async function analyze() {
   const [run1, run2, replay, tracks] = await Promise.all([
-    load<Seed>("test/rb/results-run1.json"),
+    load<Seed>(process.env.RUN1_FILE ?? "test/rb/results-run1.json"),
     load<Seed>("test/rb/results-run2-oldcaps.json"), // ling run at 8k caps (v2 120k-cap run died to an OpenRouter key-limit 403 storm — zero usable seeds)
     load<ReplayEntry>("test/rb/results-replay.json"),
     load<TrackMeta>("test/rb/tracks.json"),
@@ -75,6 +77,20 @@ export async function analyze() {
 
   console.log("== HEADLINE ==")
   for (const [k, a] of [...agg.entries()].sort()) console.log(line(k, a))
+
+  // speed: judge latency per command + seed wall time (absent on old results files)
+  const pctile = (xs: number[], p: number) => (xs.length ? xs.sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor((xs.length * p) / 100))] : 0)
+  console.log("\n== SPEED ==")
+  for (const run of [...new Set([...run1, ...run2].map((r) => r.run))].sort()) {
+    const rs = [...run1, ...run2].filter((r) => r.run === run && r.commands.some((c) => c.judgeMs))
+    if (!rs.length) continue
+    const j = rs.flatMap((r) => r.commands.map((c) => c.judgeMs!))
+    const w = rs.map((r) => r.durationMs!).filter(Boolean)
+    const mins = w.reduce((s, x) => s + x, 0) / 60_000
+    console.log(
+      `${run.padEnd(6)} judgeMs p50=${Math.round(pctile([...j], 50) / 1000)}s p95=${Math.round(pctile([...j], 95) / 1000)}s | seed wall p50=${Math.round(pctile([...w], 50) / 60_000)}min | ${(j.length / Math.max(mins, 0.01)).toFixed(1)} cmds/min`,
+    )
+  }
 
   // per-track run2 table
   console.log("\n== RUN2 PER-TRACK (ling judge + ling monitor) ==")

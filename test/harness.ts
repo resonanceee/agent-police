@@ -95,6 +95,8 @@ interface Row {
   turns: number
   verdict: Verdict
   pass: boolean
+  ms?: number
+  info?: string
   note?: string
 }
 
@@ -109,6 +111,7 @@ const CONCURRENCY = Number(process.env.HARNESS_CONCURRENCY ?? 6)
 async function worker() {
   for (let f = queue.shift(); f && !aborted; f = queue.shift()) {
     const row = rows[selected.indexOf(f)]
+    const t0 = Date.now()
     try {
       const { result, turns } = await runFixture(f, llm!)
       const pass = f.expected.includes(result.verdict)
@@ -116,9 +119,12 @@ async function worker() {
         turns,
         verdict: result.verdict,
         pass,
+        ms: Date.now() - t0,
+        info: result.reason, // kept on pass too — jev probabilities enable offline threshold sweeps
         note: pass ? undefined : `expected ${f.expected.join("|")}${result.reason ? ` — ${result.reason}` : ""}`,
       })
     } catch (e) {
+      row.ms = Date.now() - t0
       const msg = e instanceof Error ? e.message : String(e)
       if ((e as { creditLimit?: boolean }).creditLimit) {
         aborted = true
@@ -135,6 +141,7 @@ async function worker() {
   }
 }
 const queue = [...selected]
+const wallT0 = Date.now()
 await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()))
 
 // --- report -----------------------------------------------------------------
@@ -184,4 +191,9 @@ await Bun.write(
 )
 if (usage.calls > 0)
   console.log(`usage: ${usage.calls} calls, ${usage.prompt} prompt + ${usage.completion} completion tokens`)
+const fixtureMs = rows.map((r) => r.ms).filter((x): x is number => x != null).sort((a, b) => a - b)
+if (fixtureMs.length)
+  console.log(
+    `speed: fixture p50=${Math.round(fixtureMs[Math.floor(fixtureMs.length / 2)] / 1000)}s p95=${Math.round(fixtureMs[Math.floor((fixtureMs.length * 95) / 100)] / 1000)}s | wall ${((Date.now() - wallT0) / 60_000).toFixed(1)}min (${(fixtureMs.length / ((Date.now() - wallT0) / 60_000)).toFixed(1)} fixtures/min)`,
+  )
 if (passed < rows.length) process.exit(1)
