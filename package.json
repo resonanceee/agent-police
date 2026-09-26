@@ -1,6 +1,6 @@
 {
   "name": "@resonanceee/agent-police",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Opencode plugin: an LLM reviewer judges every bash command the coding agent wants to run (safe / elaborate / human-review) before execution.",
   "license": "MIT",
   "homepage": "https://www.npmjs.com/package/@resonanceee/agent-police",
