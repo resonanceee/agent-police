@@ -6,13 +6,24 @@ export interface Pending {
   turn: 1 | 2 | 3
   question?: string
   justifications: string[]
+  // set after a human-review verdict: retry meets the human again, not the judge
+  humanReview?: string
+  // set only after the human answered reject: retry hard-blocks without re-judging
+  rejected?: string
 }
 
-// in-memory, keyed by exact command string; one plugin process per session, resets on restart
+// in-memory, keyed by session + exact command string; resets on restart
 const pending = new Map<string, Pending>()
+const key = (sessionID: string, command: string) => `${sessionID}\n${command}`
 
 export function reset() {
   pending.clear()
+}
+
+// terminal outcome of the native human prompt; called by the host plugin only
+export function resolveHumanReview(sessionID: string, command: string, approved: boolean, reason = "") {
+  if (approved) pending.delete(key(sessionID, command))
+  else pending.set(key(sessionID, command), { turn: 3, justifications: [], rejected: reason || "human rejected" })
 }
 
 export function elaborateError(command: string, question: string): string {
@@ -92,14 +103,19 @@ export async function handleBash(
   sessionID: string,
   command: string,
 ): Promise<BashDecision> {
-  const entry = pending.get(command)
+  const entry = pending.get(key(sessionID, command))
+  if (entry?.rejected) return { allow: false, error: humanReviewError(command, entry.rejected) }
+  if (entry?.humanReview) {
+    // already escalated and not yet answered: retry meets the human, not the judge
+    return { allow: false, humanReview: { command, reason: entry.humanReview } }
+  }
   const t = await loadTranscript(client, sessionID)
 
   if (entry) {
     // retry after an elaborate block — justification is the agent's newest assistant text
     const justification = t.lastAssistant
     entry.justifications.push(justification)
-    entry.turn = (entry.turn + 1) as 1 | 2 | 3
+    entry.turn = Math.min(entry.turn + 1, 3) as 1 | 2 | 3
     const r = await review({
       command,
       transcript: t.text,
@@ -109,24 +125,28 @@ export async function handleBash(
     })
     afterReview(sessionID, t.text)
     if (r.verdict === "safe") {
-      pending.delete(command)
+      pending.delete(key(sessionID, command))
       return { allow: true }
     }
     if (r.verdict === "elaborate") {
       entry.question = r.question
       return { allow: false, error: elaborateError(command, r.question ?? "Explain why this command is needed.") }
     }
-    pending.delete(command)
-    return { allow: false, humanReview: { command, reason: r.reason ?? "reviewer escalated to human review" } }
+    const reason = r.reason ?? "reviewer escalated to human review"
+    pending.set(key(sessionID, command), { turn: entry.turn, justifications: entry.justifications, humanReview: reason })
+    return { allow: false, humanReview: { command, reason } }
   }
 
   // fresh command — turn 1
   const r = await review({ command, transcript: t.text, justifications: [], turn: 1, evidence: summarize(sessionID) })
   afterReview(sessionID, t.text)
   if (r.verdict === "safe") return { allow: true }
-  if (r.verdict === "human-review")
-    return { allow: false, humanReview: { command, reason: r.reason ?? "reviewer escalated to human review" } }
-  pending.set(command, { turn: 1, question: r.question, justifications: [] })
+  if (r.verdict === "human-review") {
+    const reason = r.reason ?? "reviewer escalated to human review"
+    pending.set(key(sessionID, command), { turn: 1, justifications: [], humanReview: reason })
+    return { allow: false, humanReview: { command, reason } }
+  }
+  pending.set(key(sessionID, command), { turn: 1, question: r.question, justifications: [] })
   return { allow: false, error: elaborateError(command, r.question ?? "Explain why this command is needed.") }
 }
 

@@ -1,5 +1,5 @@
 import type { Plugin } from "@opencode-ai/plugin"
-import { handleBash, loadTranscript, humanReviewError } from "./src/police"
+import { handleBash, loadTranscript, humanReviewError, resolveHumanReview } from "./src/police"
 import { observeBash, observeBashResult, observeTool } from "./src/ledger"
 import { monitor } from "./src/monitor"
 
@@ -36,6 +36,7 @@ export const AgentPolicePlugin: Plugin = async ({ client, serverUrl }) => {
     sessionID: string,
     requestID: string | null,
     body?: unknown,
+    on404?: () => void,
   ): Promise<T | null> {
     const path = requestID ? `/api/session/${sessionID}/permission/${requestID}` : `/api/session/${sessionID}/permission`
     try {
@@ -45,6 +46,10 @@ export const AgentPolicePlugin: Plugin = async ({ client, serverUrl }) => {
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(30_000),
       })
+      if (res.status === 404) {
+        on404?.()
+        return null
+      }
       if (!res.ok) return null
       return (await res.json()) as T
     } catch {
@@ -55,24 +60,30 @@ export const AgentPolicePlugin: Plugin = async ({ client, serverUrl }) => {
   // await the user's decision on a plugin-created permission request.
   // Fails closed: safety timeout or a request that vanishes without a captured
   // reply both resolve as "reject".
-  function awaitDecision(sessionID: string, requestID: string, timeoutMs = 600_000): Promise<string> {
+  function awaitDecision(
+    sessionID: string,
+    requestID: string,
+    timeoutMs = 600_000,
+  ): Promise<{ reply: string; explicit: boolean }> {
     return new Promise((resolve) => {
       let done = false
-      const settle = (reply: string) => {
+      // explicit=true only for a real permission.replied event; polls/timeouts are
+      // fail-closed but must not be recorded as a human "no"
+      const settle = (reply: string, explicit = true) => {
         if (done) return
         done = true
         clearInterval(poll)
         clearTimeout(timer)
         waiters.delete(requestID)
-        resolve(reply)
+        resolve({ reply, explicit })
       }
       waiters.set(requestID, settle)
-      // poll fallback in case the replied event is missed (fail closed on 404)
+      // poll fallback in case the replied event is missed: only a real 404 means
+      // the request vanished; network blips keep waiting until the hard timeout
       const poll = setInterval(async () => {
-        const pending = await permissionApi<unknown>("GET", sessionID, requestID)
-        if (pending === null) settle("reject")
+        await permissionApi<unknown>("GET", sessionID, requestID, undefined, () => settle("reject", false))
       }, 2000)
-      const timer = setTimeout(() => settle("reject"), timeoutMs)
+      const timer = setTimeout(() => settle("reject", false), timeoutMs)
     })
   }
 
@@ -89,10 +100,13 @@ export const AgentPolicePlugin: Plugin = async ({ client, serverUrl }) => {
       metadata: { command: hr.command, reason: hr.reason, source: "agent-police" },
     })
     if (!d) return "unavailable"
-    if (d.effect === "allow") return "allow"
-    if (d.effect === "deny" || !d.id) return "reject"
-    const reply = await awaitDecision(sessionID, d.id)
-    return reply === "once" || reply === "always" ? "allow" : "reject"
+    // only a human reply (once/always) may allow; a pre-resolved server "allow"
+    // effect must not bypass an escalation the judge sent to a human
+    if (d.effect === "deny") return "reject"
+    if (!d.id || d.effect === "allow") return "unavailable"
+    const decision = await awaitDecision(sessionID, d.id)
+    if (decision.reply === "once" || decision.reply === "always") return "allow"
+    return decision.explicit ? "reject" : "unavailable"
   }
 
   return {
@@ -122,9 +136,14 @@ export const AgentPolicePlugin: Plugin = async ({ client, serverUrl }) => {
         if (decision.allow) return
         if (decision.humanReview) {
           const verdict = await interrogate(input.sessionID, decision.humanReview)
-          if (verdict === "allow") return
-          if (verdict === "reject")
+          if (verdict === "allow") {
+            resolveHumanReview(input.sessionID, command, true)
+            return
+          }
+          if (verdict === "reject") {
+            resolveHumanReview(input.sessionID, command, false, decision.humanReview.reason)
             throw new Error(humanReviewError(command, decision.humanReview.reason))
+          }
           // native dialog unavailable (old server / API error): fail closed
           throw new Error(
             [

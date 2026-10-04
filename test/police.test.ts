@@ -1,7 +1,7 @@
 // Unit tests for the human-review flow: verdict -> decision mapping in
 // handleBash, including fail-closed reviewer errors surfacing as humanReview.
 import { describe, expect, test, beforeEach, afterEach } from "bun:test"
-import { handleBash, reset, humanReviewError, elaborateError } from "../src/police"
+import { handleBash, reset, humanReviewError, elaborateError, resolveHumanReview } from "../src/police"
 
 process.env.AGENTPOLICE_API_KEY = "test-key"
 process.env.AGENTPOLICE_MODEL = "test-model"
@@ -68,6 +68,53 @@ describe("handleBash", () => {
     expect(second.humanReview?.command).toBe("rm -rf build")
     expect(second.humanReview?.reason).toContain("scripted")
     expect(second.error).toBeUndefined()
+  })
+
+  test("human-review retry goes straight back to native review without re-judging", async () => {
+    verdictScript = ["elaborate", "human-review"]
+    await handleBash(fakeClient, "s1", "rm -rf build")
+    const second = await handleBash(fakeClient, "s1", "rm -rf build")
+    expect(second.humanReview?.reason).toContain("scripted")
+    globalThis.fetch = (async () => {
+      throw new Error("must not re-judge an escalated command")
+    }) as unknown as typeof fetch
+    const third = await handleBash(fakeClient, "s1", "rm -rf build")
+    expect(third.allow).toBe(false)
+    expect(third.humanReview?.command).toBe("rm -rf build")
+    expect(third.humanReview?.reason).toContain("scripted")
+  })
+
+  test("human allow consumes the escalation and the next run is fresh", async () => {
+    verdictScript = ["elaborate", "human-review", "safe"]
+    await handleBash(fakeClient, "s1", "rm -rf build")
+    await handleBash(fakeClient, "s1", "rm -rf build")
+    resolveHumanReview("s1", "rm -rf build", true)
+    const third = await handleBash(fakeClient, "s1", "rm -rf build")
+    expect(third.allow).toBe(true)
+    expect(third.humanReview).toBeUndefined()
+  })
+
+  test("human rejection hard-blocks the next retry without re-judging", async () => {
+    verdictScript = ["elaborate", "human-review"]
+    await handleBash(fakeClient, "s1", "rm -rf build")
+    const second = await handleBash(fakeClient, "s1", "rm -rf build")
+    const reason = second.humanReview?.reason ?? "scripted"
+    resolveHumanReview("s1", "rm -rf build", false, reason)
+    globalThis.fetch = (async () => {
+      throw new Error("must not re-judge a rejected command")
+    }) as unknown as typeof fetch
+    const third = await handleBash(fakeClient, "s1", "rm -rf build")
+    expect(third.allow).toBe(false)
+    expect(third.error).toBe(humanReviewError("rm -rf build", reason))
+    expect(third.humanReview).toBeUndefined()
+  })
+
+  test("human-review state is scoped to the session", async () => {
+    verdictScript = ["elaborate", "human-review", "safe"]
+    await handleBash(fakeClient, "s1", "same command")
+    await handleBash(fakeClient, "s1", "same command")
+    const other = await handleBash(fakeClient, "s2", "same command")
+    expect(other.allow).toBe(true)
   })
 
   test("justified retry returning safe is allowed", async () => {
