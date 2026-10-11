@@ -10,6 +10,8 @@ export interface Pending {
   humanReview?: string
   // set only after the human answered reject: retry hard-blocks without re-judging
   rejected?: string
+  // set only after the human answered allow: retry is allowed without re-judging
+  approved?: boolean
 }
 
 // in-memory, keyed by session + exact command string; resets on restart
@@ -22,7 +24,11 @@ export function reset() {
 
 // terminal outcome of the native human prompt; called by the host plugin only
 export function resolveHumanReview(sessionID: string, command: string, approved: boolean, reason = "") {
-  if (approved) pending.delete(key(sessionID, command))
+  if (approved)
+    // keep the entry so a retry short-circuits as human-approved — otherwise the
+    // next run is re-judged as a fresh turn-1 command and the judge can strike
+    // down what the human just allowed
+    pending.set(key(sessionID, command), { turn: 3, justifications: [], approved: true })
   else pending.set(key(sessionID, command), { turn: 3, justifications: [], rejected: reason || "human rejected" })
 }
 
@@ -104,6 +110,7 @@ export async function handleBash(
   command: string,
 ): Promise<BashDecision> {
   const entry = pending.get(key(sessionID, command))
+  if (entry?.approved) return { allow: true }
   if (entry?.rejected) return { allow: false, error: humanReviewError(command, entry.rejected) }
   if (entry?.humanReview) {
     // already escalated and not yet answered: retry meets the human, not the judge

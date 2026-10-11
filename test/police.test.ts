@@ -84,11 +84,14 @@ describe("handleBash", () => {
     expect(third.humanReview?.reason).toContain("scripted")
   })
 
-  test("human allow consumes the escalation and the next run is fresh", async () => {
-    verdictScript = ["elaborate", "human-review", "safe"]
+  test("human allow persists: the next run is allowed without re-judging", async () => {
+    verdictScript = ["elaborate", "human-review"]
     await handleBash(fakeClient, "s1", "rm -rf build")
     await handleBash(fakeClient, "s1", "rm -rf build")
     resolveHumanReview("s1", "rm -rf build", true)
+    globalThis.fetch = (async () => {
+      throw new Error("must not re-judge a human-approved command")
+    }) as unknown as typeof fetch
     const third = await handleBash(fakeClient, "s1", "rm -rf build")
     expect(third.allow).toBe(true)
     expect(third.humanReview).toBeUndefined()
