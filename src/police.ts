@@ -22,7 +22,8 @@ export function reset() {
   pending.clear()
 }
 
-// terminal outcome of the native human prompt; called by the host plugin only
+// terminal outcome of the native human prompt; called by the host plugin when
+// it observes the permission reply (once/always -> approved, reject -> rejected)
 export function resolveHumanReview(sessionID: string, command: string, approved: boolean, reason = "") {
   if (approved)
     // keep the entry so a retry short-circuits as human-approved — otherwise the
@@ -30,6 +31,32 @@ export function resolveHumanReview(sessionID: string, command: string, approved:
     // down what the human just allowed
     pending.set(key(sessionID, command), { turn: 3, justifications: [], approved: true })
   else pending.set(key(sessionID, command), { turn: 3, justifications: [], rejected: reason || "human rejected" })
+}
+
+export type EscalationState = "pending" | "rejected" | "approved"
+
+export interface Escalation {
+  command: string
+  reason: string
+  state: EscalationState
+}
+
+// Human-review state for a session, read by the host plugin's two consumers:
+// the permission.evaluate hook (turns "pending" into the native ask dialog)
+// and the permission.replied event (resolves it into approved/rejected).
+// Conversation keys embed the full command (which may contain newlines), so
+// match by prefix instead of splitting.
+export function escalations(sessionID: string): Escalation[] {
+  const out: Escalation[] = []
+  const prefix = sessionID + "\n"
+  for (const [k, entry] of pending) {
+    if (!k.startsWith(prefix)) continue
+    const command = k.slice(prefix.length)
+    if (entry.humanReview !== undefined) out.push({ command, reason: entry.humanReview, state: "pending" })
+    else if (entry.rejected !== undefined) out.push({ command, reason: entry.rejected, state: "rejected" })
+    else if (entry.approved === true) out.push({ command, reason: "", state: "approved" })
+  }
+  return out
 }
 
 export function elaborateError(command: string, question: string): string {
@@ -58,22 +85,30 @@ interface Transcript {
   lastAssistant: string
 }
 
-// client is the opencode SDK client; typed loosely to survive SDK churn at this boundary
+// ctx is the opencode V2 plugin context; typed loosely to survive API churn at
+// this boundary
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Client = any
+type Ctx = any
 
-export async function loadTranscript(client: Client, sessionID: string): Promise<Transcript> {
-  const res = await client.session.messages({ path: { id: sessionID } })
-  const msgs: Array<{ info: { role: string }; parts: Array<{ type: string; text?: string }> }> = res.data ?? []
+// V2 messages: user turns carry `.text`; assistant turns carry a `.content`
+// array with text/reasoning/tool parts. Older V1 parts are not present.
+export async function loadTranscript(ctx: Ctx, sessionID: string): Promise<Transcript> {
+  const msgs: Array<Record<string, unknown>> = (await ctx.session.context({ sessionID })) ?? []
   const lines: string[] = []
   let lastAssistant = ""
   for (const m of msgs) {
-    const texts = m.parts
-      .filter((p) => p.type === "text" && p.text && !p.text.startsWith("AGENT POLICE"))
-      .map((p) => p.text!.trim())
-    if (texts.length === 0) continue
-    const joined = texts.join("\n")
-    if (m.info.role === "assistant") {
+    const texts: string[] = []
+    if (m.type === "user" && typeof m.text === "string") {
+      texts.push(m.text.trim())
+    } else if (m.type === "assistant" && Array.isArray(m.content)) {
+      for (const c of m.content as Array<Record<string, unknown>>) {
+        if (c && c.type === "text" && typeof c.text === "string") texts.push(c.text.trim())
+      }
+    }
+    const kept = texts.filter((t) => t.length > 0 && !t.startsWith("AGENT POLICE"))
+    if (kept.length === 0) continue
+    const joined = kept.join("\n")
+    if (m.type === "assistant") {
       lines.push("assistant: " + joined)
       lastAssistant = joined
     } else {
@@ -88,8 +123,9 @@ export async function loadTranscript(client: Client, sessionID: string): Promise
 export interface BashDecision {
   allow: boolean
   error?: string
-  // set on a human-review verdict: the host plugin must interrogate the user
-  // (native permission dialog) and only proceed on an explicit allow
+  // set on a human-review verdict: the host plugin records the escalation and
+  // lets the command reach the shell tool's own permission check, where the
+  // evaluate hook raises the native dialog
   humanReview?: { command: string; reason: string }
 }
 
@@ -105,7 +141,7 @@ function afterReview(sessionID: string, transcript: string) {
 }
 
 export async function handleBash(
-  client: Client,
+  ctx: Ctx,
   sessionID: string,
   command: string,
 ): Promise<BashDecision> {
@@ -116,7 +152,7 @@ export async function handleBash(
     // already escalated and not yet answered: retry meets the human, not the judge
     return { allow: false, humanReview: { command, reason: entry.humanReview } }
   }
-  const t = await loadTranscript(client, sessionID)
+  const t = await loadTranscript(ctx, sessionID)
 
   if (entry) {
     // retry after an elaborate block — justification is the agent's newest assistant text
